@@ -29,7 +29,7 @@ args = parser.parse_args()
 
 #load configuration file
 config = configparser.ConfigParser()
-config.read(os.path.dirname(__file__)+'/syncManager.ini')
+config.read(os.path.dirname(os.path.realpath(__file__))+'/syncManager.ini')
 
 # Function to load env var or failover on the configuration file
 def get_value(env_var, config_section, config_key, as_list=False):
