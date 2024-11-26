@@ -128,7 +128,7 @@ if args.backup:
     progress("Script executed in restore mode the "+str(currentDate))
     ##Script execution
     #if no db in dbList, trying to collect all db available with this credentials and this host
-    if not dbList:
+    if not any(dbList):
         if not dbpassword:
             progress("!- No database information available, switching file only")
         else:
