@@ -229,7 +229,7 @@ elif args.restore:
                 for filename in filenames:
                     if filename.endswith(".sql"):
                         cleanDatabaseList.append(filename.split(".")[0])
-        dbList = cleanDatabaseList
+            dbList = cleanDatabaseList
         if any(dbList):
             for db in dbList:
                 progress("Start database restoration :"+db)
