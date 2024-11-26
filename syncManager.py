@@ -141,7 +141,7 @@ if args.backup:
                     if database:
                         cleanDatabaseList.append(database)
                         progress("-- Found :"+database)
-                        progress("done)")
+                        progress("done")
             dbList = cleanDatabaseList 
     if args.env=="dev" or args.env=="prod":
         progress("Starting backup of "+servicename+" to S3 "+args.env)
