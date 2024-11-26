@@ -202,12 +202,12 @@ elif args.restore:
                 #rm -rf / protection
                 if len(path+"/*") > 2:  
                     os.system('rm -rf '+path+'/*')
-                    progress("-- Get target folder security settings...")
+                    progress("-- Get target folder folder security settings for "+path+" ... ")
                     pathInfo = Path(path)
                     owner = pathInfo.owner()
                     group = pathInfo.group()
                     progress("done")
-                    progress("-- Move restored file to the target folder and restore security settings...")
+                    progress("-- Move restored file to "+path+" and restore security settings...")
                     os.system('mv '+dumpDirPath+'/'+os.path.basename(os.path.normpath(path))+'/* '+path+'/')
                     os.system('chown -R '+owner+':'+group+' '+path)
                     progress("done")
