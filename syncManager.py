@@ -130,8 +130,9 @@ if args.backup:
     #if no db in dbList, trying to collect all db available with this credentials and this host
     if not dbList:
         if not dbpassword:
-            progress("!- no database information available, switching file only")
+            progress("!- No database information available, switching file only")
         else:
+            progress("!- No database specified, trying to search with credentials")
             #retrieve all databases
             databaseList = subprocess.check_output("mariadb -u "+dbadmin+" -p"+dbpassword+" -sN -e 'show databases'", shell=True).decode().split("\n")
             cleanDatabaseList = []
@@ -139,6 +140,8 @@ if args.backup:
                 if database not in excludedDbs:
                     if database:
                         cleanDatabaseList.append(database)
+                        progress("-- Found :"+database)
+                        progress("done)")
             dbList = cleanDatabaseList 
     if args.env=="dev" or args.env=="prod":
         progress("Starting backup of "+servicename+" to S3 "+args.env)
