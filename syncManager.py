@@ -37,7 +37,7 @@ def get_value(env_var, config_section, config_key, as_list=False):
     return value.split(',') if as_list else value
 
 ##Script env configuration
-scriptsDir = os.path.dirname(__file__)+"/"
+scriptsDir = os.path.dirname(os.path.realpath(__file__))+"/"
 servicename = config.get("info", "servicename")
 pathsList = get_value('PATH_LIST', 'pathListTobackup', 'path', as_list=True)
 dbList = get_value('DATABASE_NAME', 'dbListTobackup', 'db', as_list=True)
