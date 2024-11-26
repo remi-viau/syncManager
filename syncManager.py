@@ -107,7 +107,7 @@ def testVars():
     # if errors print them then exit
     if errors:
         progress("+! Missing mandatory params")
-        progress("\n"+join(errors))
+        progress("\n".join(errors))
         progress("Stopping process")
         sys.exit(1)
 testVars()
