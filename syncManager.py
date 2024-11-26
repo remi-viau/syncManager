@@ -140,9 +140,14 @@ if args.backup:
                 if database not in excludedDbs:
                     if database:
                         cleanDatabaseList.append(database)
-                        progress("-- Found :"+database)
+                        progress("-- Found : "+database+" ")
                         progress("done")
             dbList = cleanDatabaseList 
+            if not any(dbList):
+                progress("!- No database found, will try files only")
+                if not any(pathsList):
+                    progress("!- No files specified exiting")
+                    sys.exit(1)
     if args.env=="dev" or args.env=="prod":
         progress("Starting backup of "+servicename+" to S3 "+args.env)
         checkBaseFolder()
@@ -152,11 +157,14 @@ if args.backup:
                 progress("-- Backup database "+db+" to the temp folder...")
                 os.system("mariadb-dump -u "+dbadmin+" -p"+dbpassword+" -h "+dbhost+" --complete-insert --routines --triggers --single-transaction \""+db+"\" > "+dumpDirPath+"/\""+db+"\".sql")
                 progress("done")
-        if pathsList:
+        if any(pathsList):
             for path in pathsList:
                 progress("-- Copy all content from "+path+" to the temp folder...")
                 os.system("cp -r "+path+" "+dumpDirPath+"/")
                 progress("done")
+        else:
+            progress("!- No files specified exiting")
+            sys.exit(1)
         progress("-- Compress all files in the temp folder")
         os.system("tar -C "+dumpDirPath+" -czf "+workingDir +"/backup.tar.gz .")
         progress("done")
