@@ -163,7 +163,7 @@ if args.backup:
                 os.system("cp -r "+path+" "+dumpDirPath+"/")
                 progress("done")
         else:
-            progress("!- No files specified, only backup database")
+            progress("!- No files specified, database backup only")
         progress("-- Compress all files in the temp folder")
         os.system("tar -C "+dumpDirPath+" -czf "+workingDir +"/backup.tar.gz .")
         progress("done")
@@ -206,8 +206,8 @@ elif args.restore:
         progress("-- Uncompress the backup to temp folder...")
         os.system("tar -xzf "+workingDir+"/backup.tar.gz -C "+dumpDirPath+"/.")
         progress("done")
-        progress("Restore files")
-        if pathsList:
+        if any(pathsList):
+            progress("Restore files")
             for path in pathsList:
                 #rm -rf / protection
                 if len(path+"/*") > 2:  
@@ -222,19 +222,19 @@ elif args.restore:
                     os.system('chown -R '+owner+':'+group+' '+path)
                     progress("done")
         else:
-            progress("!- Aucun fichier présent dans le fichier de restoration")
-        if not dbList:
+            progress("!- No files specified, database restoration only ")
+        if not any(dbList):
             for dirpath, dirnames, filenames in os.walk(dumpDirPath):
                 for filename in filenames:
                     if filename.endswith(".sql"):
                         dbList.append(filename.split(".")[0])
-        if dbList:
+        if any(dbList):
             for db in dbList:
-                progress("Restore database")
-                progress("-- Drop database before restoring data...")
+                progress("Start database restoration :"+db)
+                progress("-- Drop "+db+" database before restoring data...")
                 os.system('mariadb-admin -s -u'+dbadmin+' -p'+dbpassword+' -h '+dbhost+' -f drop '+db+" > /dev/null")
                 progress("done")
-                progress("-- Restore database from backup...")
+                progress("-- Restore database "+db+" from backup...")
                 os.system('mariadb-admin -s -u'+dbadmin+' -p'+dbpassword+' -h '+dbhost+' -f create '+db)
                 os.system('mariadb -u'+dbadmin+' -p'+dbpassword+' -h '+dbhost+' -D '+db+' < '+dumpDirPath+'/'+db+'.sql')
                 progress("done")
