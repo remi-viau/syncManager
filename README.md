@@ -1,7 +1,7 @@
-# Backup and Restore Script for S3
+# Backup and Restore Script for docker and S3
 
 ## Overview
-This script provides a solution for automating the backup and restoration of static data folders and service databases to/from an S3 bucket. It supports multiple environments (e.g., `dev` and `prod`) and includes options for viewing available restore points.
+This script provides a solution for automating the backup and restoration of static data folders and service databases inside a docker container to/from an S3 bucket. It supports multiple environments (e.g., `dev` and `prod`) and includes options for viewing available restore points.
 
 ## Features
 - **Backup**: Compresses specified directories and databases, uploads them to OVH S3, and manages retention policies.
@@ -11,7 +11,7 @@ This script provides a solution for automating the backup and restoration of sta
 
 ## Prerequisites
 - Python 3.6 or higher
-- Access to OVH S3 with credentials
+- Access to S3 with credentials
 - Two "production" buckets on S3 named {service}-backup-primary on first region and {service}-backup-secondary on second region
 - Two "development" buckets on S3 named {service}-backup-primary-dev on first region and {service}-backup-secondary-dev on second region
 - Installed dependencies:
@@ -21,6 +21,7 @@ This script provides a solution for automating the backup and restoration of sta
 
 ## Usage
 Run the script with `docker exec -it -u root` or any suitable Docker container execution method.
+Add it to a local cron via `docker exec -t -u root` to schedule your container backups
 
 ### Command Options
 | Flag             | Description                                                                 |
@@ -35,17 +36,17 @@ Run the script with `docker exec -it -u root` or any suitable Docker container e
 ### Example Commands
 1. **Backup data for `prod` environment**:
    ```bash
-   docker exec -it -u root {service] syncManager.py --backup --env prod
+   docker exec -it -u root {service} syncManager.py --backup --env prod
    ```
 
 2. **Restore data for `dev` environment**:
    ```bash
-   docker exec -it -u root {service] syncManager.py --restore --env dev --date 20231121-120000
+   docker exec -it -u root {service} syncManager.py --restore --env dev --date 20231121-120000
    ```
 
 3. **Show available restore points for `prod` environment**:
    ```bash
-   docker exec -it -u root {service] syncManager.py --show --env prod
+   docker exec -it -u root {service} syncManager.py --show --env prod
    ```
 
 ## Configuration
