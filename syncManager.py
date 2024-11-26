@@ -163,8 +163,7 @@ if args.backup:
                 os.system("cp -r "+path+" "+dumpDirPath+"/")
                 progress("done")
         else:
-            progress("!- No files specified exiting")
-            sys.exit(1)
+            progress("!- No files specified, only backup database")
         progress("-- Compress all files in the temp folder")
         os.system("tar -C "+dumpDirPath+" -czf "+workingDir +"/backup.tar.gz .")
         progress("done")
