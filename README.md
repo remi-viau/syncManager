@@ -53,6 +53,9 @@ Add it to a local cron via `docker exec -t -u root` to schedule your container b
 The script reads settings from `syncManager.ini` in the script directory. Update the file with your service name, paths to backup, databases, and S3 credentials.
 Or use env var listed : DATABASE_USERNAME, DATABASE_PASSWORD, DATABASE_HOST, S3_BACKUP_ACCESS_KEY, S3_BACKUP_SECRET_KEY, S3_BACKUP_ACCESS_KEY_DEV, S3_BACKUP_SECRET_KEY_DEV
 
+##included files
+s3.cfg : Default s3cmd configuration. Mandatory for s3cmd to run
+syncManager.ini: Exemple configuration file, fill it before starting the script 
 
 ### `syncManager.ini` Example
 ```ini
