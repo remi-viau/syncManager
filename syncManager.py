@@ -224,10 +224,12 @@ elif args.restore:
         else:
             progress("!- No files specified, database restoration only ")
         if not any(dbList):
+            cleanDatabaseList = []
             for dirpath, dirnames, filenames in os.walk(dumpDirPath):
                 for filename in filenames:
                     if filename.endswith(".sql"):
-                        dbList.append(filename.split(".")[0])
+                        cleanDatabaseList.append(filename.split(".")[0])
+        dbList = cleanDatabaseList
         if any(dbList):
             for db in dbList:
                 progress("Start database restoration :"+db)
