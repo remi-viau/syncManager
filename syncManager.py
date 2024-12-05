@@ -12,7 +12,13 @@
 # Script intented to backup/restore static data folder and service database to/from this own S3 bucket on OVH S3
 #
 # Run this script with docker exec -it -u root
-#
+# Create this bucket on s3 
+#  Prod S3 with Prod users/credentials :
+# -> servicename-backup-primary
+# -> servicename-backup-primary
+#  Dev S3 with Dev users/credentials :
+# -> servicename-backup-primary-dev
+# 
 from datetime import datetime
 from pathlib import Path
 import os, subprocess, argparse, configparser, sys, time
@@ -52,12 +58,12 @@ s3SecretKeyDev = get_value('S3_BACKUP_SECRET_KEY_DEV', 's3Credentials', 's3Secre
 retentionDays = config.getint("backupSettings", "retentionDays", fallback=30)
 
 #internal var generation
+#if env dev called , filling region with only primary, if prod primary then secondary
 if args.env == "dev":
     s3AccessKey = s3AccessKeyDev
     s3SecretKey = s3SecretKeyDev
     regionS3 = {
         "primary-dev": config.get("regionS3", "primary"),
-        "secondary-dev": config.get("regionS3", "secondary")
     }
 else:
     regionS3 = {
