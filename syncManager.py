@@ -227,7 +227,7 @@ elif args.restore:
                     os.system('rm -rf '+path+'/*')
                     progress("done")
                     progress("-- Move restored file to "+path+" and restore security settings...")
-                    os.system('mv '+dumpDirPath+'/'+path+'/* '+path)
+                    os.system('mv '+dumpDirPath+path+'/* '+path)
                     os.system('chown -R '+owner+':'+group+' '+path)
                     progress("done")
         else:
