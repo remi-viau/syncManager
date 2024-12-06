@@ -166,7 +166,9 @@ if args.backup:
         if any(pathsList):
             for path in pathsList:
                 progress("-- Copy all content from "+path+" to the temp folder...")
-                os.system("cp -r "+path+" "+dumpDirPath+"/")
+                #Create source arboresence in backup then copy files into
+                print("mkdir -p "+dumpDirPath+path+"/ && cp -r "+path+" "+dumpDirPath+path+"/")
+                os.system("mkdir -p "+dumpDirPath+path+"/ && cp -r "+path+"/* "+dumpDirPath+path+"/")
                 progress("done")
         else:
             progress("!- No files specified, database backup only")
@@ -215,16 +217,18 @@ elif args.restore:
         if any(pathsList):
             progress("Restore files")
             for path in pathsList:
-                #rm -rf / protection
                 if len(path+"/*") > 2:  
-                    os.system('rm -rf '+path+'/*')
                     progress("-- Get target folder folder security settings for "+path+" ... ")
                     pathInfo = Path(path)
                     owner = pathInfo.owner()
                     group = pathInfo.group()
                     progress("done")
+                    progress("-- Delete content in "+path+" ... ")
+                    #rm -rf / protection
+                    os.system('rm -rf '+path+'/*')
+                    progress("done")
                     progress("-- Move restored file to "+path+" and restore security settings...")
-                    os.system('mv '+dumpDirPath+'/'+os.path.basename(os.path.normpath(path))+'/* '+path+'/')
+                    os.system('mv '+dumpDirPath+'/'+path+'/* '+path)
                     os.system('chown -R '+owner+':'+group+' '+path)
                     progress("done")
         else:
