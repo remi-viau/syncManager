@@ -200,14 +200,14 @@ if args.backup:
 elif args.restore:
     progress("Script executed in restore mode the "+str(currentDate))
     #test if date specified can be restored
-    if not (os.popen("s3cmd -c "+scriptsDir+"s3.cfg --host="+regionS3.get("primary")+" --access_key="+s3AccessKey+" --secret_key="+s3SecretKey+" ls s3://"+servicename+"-backup-primary/"+args.date+" | awk '{print $NF}'").read().splitlines()):
+    if not (os.popen("s3cmd -c "+scriptsDir+"s3.cfg --host="+regionS3.get(next(iter(regionS3)))+" --access_key="+s3AccessKey+" --secret_key="+s3SecretKey+" ls s3://"+servicename+"-backup-"+next(iter(regionS3))+"/"+args.date+"/  | awk '{print $NF}'").read().splitlines()):
         progress("!- The date you specified does not exist on storage, please verify with --show command")
         exit()
     if args.env=="dev" or args.env=="prod":
         progress("Starting restore from "+args.date+" folder in S3 backup")
         checkBaseFolder()
         progress("-- Download backup to temp folder...")
-        os.system("s3cmd -q -c "+scriptsDir+"s3.cfg --host="+regionS3.get("primary")+" --access_key="+s3AccessKey+" --secret_key="+s3SecretKey+" get s3://"+servicename+"-backup-primary/"+args.date+"/backup.tar.gz "+workingDir )
+        os.system("s3cmd -q -c "+scriptsDir+"s3.cfg --host="+regionS3.get(next(iter(regionS3)))+" --access_key="+s3AccessKey+" --secret_key="+s3SecretKey+" get s3://"+servicename+"-backup-"+next(iter(regionS3))+"/"+args.date+"/backup.tar.gz "+workingDir )
         progress("done")
         progress("-- Uncompress the backup to temp folder...")
         os.system("tar -xzf "+workingDir+"/backup.tar.gz -C "+dumpDirPath+"/.")
@@ -260,7 +260,7 @@ elif args.restore:
 elif args.show:
     if args.env=="dev" or args.env=="prod":
         progress("List of available restoration points on : "+regionS3.get("primary"))
-        restorePoints = os.popen("s3cmd -c "+scriptsDir+"s3.cfg --host="+regionS3.get("primary")+" --access_key="+s3AccessKey+" --secret_key="+s3SecretKey+" ls s3://"+servicename+"-backup-primary/ | awk '{print $NF}'").read().splitlines()
+        restorePoints = os.popen("s3cmd -c "+scriptsDir+"s3.cfg --host="+regionS3.get(next(iter(regionS3)))+" --access_key="+s3AccessKey+" --secret_key="+s3SecretKey+" ls s3://"+servicename+"-backup-primary/ | awk '{print $NF}'").read().splitlines()
         for point in restorePoints:
             progress("-> "+(point.split('/'))[3])
         exit()
