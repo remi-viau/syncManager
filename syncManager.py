@@ -167,7 +167,6 @@ if args.backup:
             for path in pathsList:
                 progress("-- Copy all content from "+path+" to the temp folder...")
                 #Create source arboresence in backup then copy files into
-                print("mkdir -p "+dumpDirPath+path+"/ && cp -r "+path+" "+dumpDirPath+path+"/")
                 os.system("mkdir -p "+dumpDirPath+path+"/ && cp -r "+path+"/* "+dumpDirPath+path+"/")
                 progress("done")
         else:
