@@ -7,47 +7,91 @@
 #  |_____/ \__, |_| |_|\___|_|  |_|\__,_|_| |_|\__,_|\__, |\___|_|
 #           __/ |                                     __/ |
 #          |___/                                     |___/
-# Version 3.1 - 21 - 11 - 2024
-# Writed by : Rémi Viau
-# Script intented to backup/restore static data folder and service database to/from this own S3 bucket on OVH S3
+# Version 3.2 - 02 - 04 - 2025
+# Written by: Rémi Viau
 #
-# Run this script with docker exec -it -u root
-# Create this bucket on s3 
-#  Prod S3 with Prod users/credentials :
-# -> servicename-backup-primary
-# -> servicename-backup-primary
-#  Dev S3 with Dev users/credentials :
-# -> servicename-backup-primary-dev
-# 
+# DESCRIPTION:
+# This script manages backup and restoration of static data folders and service databases
+# to/from OVH S3 buckets. It supports both development and production environments with
+# separate credentials and bucket naming conventions.
+#
+# FEATURES:
+# - Backup: Creates compressed archives of specified paths and databases, uploads to S3
+# - Restore: Downloads and restores from specified or latest backup
+# - Show: Lists available restore points from S3
+# - Environment support: dev (primary-dev) and prod (primary/secondary)
+# - Automatic cleanup of old backups based on retention period
+#
+# USAGE:
+# Run with docker exec -it -u root <container_name> python3 syncManager.py [options]
+# Options:
+#   --backup        Create and upload a backup
+#   --restore       Restore from a backup
+#   --show          List available restore points
+#   --env [dev|prod] Environment to work with (required)
+#   --date [YYYYMMDD-HHMMSS] Specific backup date to restore (default: latest)
+#   --extra [path]  Path to additional script to run after restore
+#
+# CONFIGURATION:
+# Requires syncManager.ini in the same directory with sections:
+# [info] servicename
+# [pathListTobackup] path
+# [dbListTobackup] db
+# [databaseCredentials] dbadmin, dbpassword, dbhost
+# [s3Credentials] s3AccessKey, s3SecretKey, s3AccessKeyDev, s3SecretKeyDev
+# [regionS3] primary, secondary
+# [backupSettings] retentionDays
+#
+# DEPENDENCIES:
+# - Python 3.x
+# - s3cmd
+# - mariadb/mariadb-dump
+# - tar
+#
+# NOTES:
+# - Must be run as root for proper file permissions
+# - S3 buckets must be pre-created: servicename-backup-[primary|primary-dev|secondary]
+# - Uses environment variables as override for config file values
+
+import os
+import sys
+import time
+import shutil
+import subprocess
+import argparse
+import configparser
 from datetime import datetime
 from pathlib import Path
-import os, subprocess, argparse, configparser, sys, time
+import logging
 
-##argument
-parser = argparse.ArgumentParser(description='This program is intented to backup and restore  all wordpress content and data to/from S3')
-parser.add_argument('--backup', action='store_true',help='Create a backup and upload it on S3')
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+logger = logging.getLogger(__name__)
+
+# Argument parsing
+parser = argparse.ArgumentParser(description='Backup and restore WordPress content and data to/from S3')
+parser.add_argument('--backup', action='store_true', help='Create a backup and upload it to S3')
 parser.add_argument('--restore', action='store_true', help='Restore the latest backup from S3')
-parser.add_argument('--show', action='store_true', help='Show available restore point from choosedn envirronement')
-parser.add_argument('--env', help='The name of the env to backup/restore on S3 (dev or prod)', required=True)
-parser.add_argument('--date', help='The date to restore based on folder name on S3 (default to latest)', default="latest")
-parser.add_argument('--extra', help='Path to extra script to start after restore')
+parser.add_argument('--show', action='store_true', help='Show available restore points')
+parser.add_argument('--env', help='Environment to backup/restore (dev or prod)', required=True)
+parser.add_argument('--date', help='Date to restore (default: latest)', default="latest")
+parser.add_argument('--extra', help='Path to extra script to run after restore')
 args = parser.parse_args()
 
-#load configuration file
+# Load configuration
 config = configparser.ConfigParser()
-config.read(os.path.dirname(os.path.realpath(__file__))+'/syncManager.ini')
+config.read(os.path.dirname(os.path.realpath(__file__)) + '/syncManager.ini')
 
-# Function to load env var or failover on the configuration file
+# Utility functions
 def get_value(env_var, config_section, config_key, as_list=False):
     value = os.getenv(env_var) or config.get(config_section, config_key)
     return value.split(',') if as_list else value
 
-##Script env configuration
-scriptsDir = os.path.dirname(os.path.realpath(__file__))+"/"
+# Script configuration
+scriptsDir = os.path.dirname(os.path.realpath(__file__)) + "/"
 servicename = config.get("info", "servicename")
 pathsList = get_value('PATH_LIST', 'pathListTobackup', 'path', as_list=True)
 dbList = get_value('DATABASE_NAME', 'dbListTobackup', 'db', as_list=True)
-# Récupérer les données
 dbadmin = get_value('DATABASE_USERNAME', 'databaseCredentials', 'dbadmin')
 dbpassword = get_value('DATABASE_PASSWORD', 'databaseCredentials', 'dbpassword')
 dbhost = get_value('DATABASE_HOST', 'databaseCredentials', 'dbhost')
@@ -57,29 +101,27 @@ s3AccessKeyDev = get_value('S3_BACKUP_ACCESS_KEY_DEV', 's3Credentials', 's3Acces
 s3SecretKeyDev = get_value('S3_BACKUP_SECRET_KEY_DEV', 's3Credentials', 's3SecretKeyDev')
 retentionDays = config.getint("backupSettings", "retentionDays", fallback=30)
 
-#internal var generation
-#if env dev called , filling region with only primary, if prod primary then secondary
+# Environment-specific configuration
 if args.env == "dev":
     s3AccessKey = s3AccessKeyDev
     s3SecretKey = s3SecretKeyDev
-    regionS3 = {
-        "primary-dev": config.get("regionS3", "primary"),
-    }
+    regionS3 = {"primary-dev": config.get("regionS3", "primary")}
 else:
     regionS3 = {
         "primary": config.get("regionS3", "primary"),
         "secondary": config.get("regionS3", "secondary")
     }
-    
-workingDir = scriptsDir+'temp/'
+
+# Internal variables
+workingDir = scriptsDir + 'temp/'
 currentDate = datetime.now()
 pathDate = currentDate.strftime('%Y%m%d-%H%M%S')
 dumpDirPath = workingDir + pathDate
-excludedDbs = ['mysql','information_schema','performance_schema', 'sys']    
+excludedDbs = ['mysql', 'information_schema', 'performance_schema', 'sys']
 start_time = time.time()
 
 class bcolors:
-    DEFAULT='\033[97m'
+    DEFAULT = '\033[97m'
     OKGREEN = "\033[92m"
     HEADER = "\033[95m"
     WARNING = "\033[93m"
@@ -87,193 +129,167 @@ class bcolors:
 
 def progress(text):
     if text == "done":
-        return print(f"{bcolors.OKGREEN} ✔{bcolors.DEFAULT}")
-    elif text[0] == "!":
-        return print(f"{bcolors.WARNING}{text}{bcolors.DEFAULT}")
-    elif text[0] == "+":
-        return print(f"{bcolors.FAIL}{text}{bcolors.DEFAULT}")
-    elif text[0] == "-":
-        return print(f"{text}", end="", flush=True)
+        logger.info(f"{bcolors.OKGREEN} ✔{bcolors.DEFAULT}")
+    elif text.startswith("!"):
+        logger.warning(f"{bcolors.WARNING}{text}{bcolors.DEFAULT}")
+    elif text.startswith("+"):
+        logger.error(f"{bcolors.FAIL}{text}{bcolors.DEFAULT}")
+    elif text.startswith("-"):
+        print(f"{text}", end="", flush=True)
     else:
-        return print(f"{bcolors.HEADER}{text}{bcolors.DEFAULT}")
+        logger.info(f"{bcolors.HEADER}{text}{bcolors.DEFAULT}")
 
-#testing mandatory var presence
-def testVars():
+def test_vars():
     mandatory_vars = [
-        ("-- Service name", servicename),
-        ("-- S3 Access key", s3AccessKey),
-        ("-- S3 Secret key", s3SecretKey),
+        ("Service name", servicename),
+        ("S3 Access key", s3AccessKey),
+        ("S3 Secret key", s3SecretKey),
     ]
-    errors = []
-    # Check vars
-    for var_name, var_value in mandatory_vars:
-        if not var_value:
-            errors.append(f"{var_name} not found")
-
-    # if errors print them then exit
+    errors = [f"{name} not found" for name, value in mandatory_vars if not value]
     if errors:
-        progress("+! Missing mandatory params")
-        progress("\n".join(errors))
-        progress("Stopping process")
-        sys.exit(1)
-testVars()
+        raise ValueError("\n".join(errors))
 
-#function to check base foder if needed
-def checkBaseFolder():
+def check_base_folder():
     progress("-- Create temp folder for backup or restore...")
-    if not os.path.exists(workingDir):os.mkdir(workingDir)
-    if not os.path.exists(dumpDirPath):os.mkdir(dumpDirPath)
+    os.makedirs(dumpDirPath, exist_ok=True)
     progress("done")
 
-#####################
-#                   #
-#     Backup        #
-#                   #
-#####################
-if args.backup:
-    progress("Script executed in restore mode the "+str(currentDate))
-    ##Script execution
-    #if no db in dbList, trying to collect all db available with this credentials and this host
-    if not any(dbList):
-        if not dbpassword:
-            progress("!- No database information available, switching file only")
-        else:
-            progress("!- No database specified, trying to search with credentials")
-            #retrieve all databases
-            databaseList = subprocess.check_output("mariadb -u "+dbadmin+" -p"+dbpassword+" -sN -e 'show databases'", shell=True).decode().split("\n")
-            cleanDatabaseList = []
-            for database in databaseList:
-                if database not in excludedDbs:
-                    if database:
-                        cleanDatabaseList.append(database)
-                        progress("-- Found : "+database+" ")
-                        progress("done")
-            dbList = cleanDatabaseList 
-            if not any(dbList):
-                progress("!- No database found, will try files only")
-                if not any(pathsList):
-                    progress("!- No files specified exiting")
-                    sys.exit(1)
-    if args.env=="dev" or args.env=="prod":
-        progress("Starting backup of "+servicename+" to S3 "+args.env)
-        checkBaseFolder()
-        #backup all dbs
-        if dbpassword:
-            for db in dbList:
-                progress("-- Backup database "+db+" to the temp folder...")
-                os.system("mariadb-dump -u "+dbadmin+" -p"+dbpassword+" -h "+dbhost+" --complete-insert --routines --triggers --single-transaction \""+db+"\" > "+dumpDirPath+"/\""+db+"\".sql")
-                progress("done")
-        if any(pathsList):
-            for path in pathsList:
-                progress("-- Copy all content from "+path+" to the temp folder...")
-                #Create source arboresence in backup then copy files into
-                os.system("mkdir -p "+dumpDirPath+path+"/ && cp -r "+path+"/* "+dumpDirPath+path+"/")
-                progress("done")
-        else:
-            progress("!- No files specified, database backup only")
-        progress("-- Compress all files in the temp folder")
-        os.system("tar -C "+dumpDirPath+" -czf "+workingDir +"/backup.tar.gz .")
-        progress("done")
-        #push to s3
-        for priority, region in regionS3.items():
-            progress("-- Upload compressed archive to "+region+" on s3://"+servicename+"-backup-"+priority+"...")
-            os.system("s3cmd -q -c "+scriptsDir+"s3.cfg --host="+region+" --access_key="+s3AccessKey+" --secret_key="+s3SecretKey+" put "+workingDir +"/backup.tar.gz s3://"+servicename+"-backup-"+priority+"/"+pathDate+"/")
-            os.system("s3cmd -q -c "+scriptsDir+"s3.cfg --host="+region+" --access_key="+s3AccessKey+" --secret_key="+s3SecretKey+" del -r s3://"+servicename+"-backup-"+priority+"/latest/")
-            os.system("s3cmd -q -c "+scriptsDir+"s3.cfg --host="+region+" --access_key="+s3AccessKey+" --secret_key="+s3SecretKey+" cp -r s3://"+servicename+"-backup-"+priority+"/"+pathDate+"/ s3://"+servicename+"-backup-"+priority+"/latest/")
-            progress("done")
-            progress("-- S3 Cleanup on "+region+"...")
-            folderList = os.popen("s3cmd -q -c "+scriptsDir+"s3.cfg --host="+region+" --access_key="+s3AccessKey+" --secret_key="+s3SecretKey+" ls s3://"+servicename+"-backup-"+priority+"/ | awk '{print $NF}'").read().splitlines()
-            for folder in folderList:
-                if folder != "s3://"+servicename+"-backup-"+priority+"/latest/":
-                    folderDate = (folder.split('/'))[3]
-                    folderDate = datetime.strptime(folderDate,'%Y%m%d-%H%M%S')
-                    if (datetime.timestamp(currentDate) - datetime.timestamp(folderDate)) > (retentionDays * 24 * 60 * 60):
-                        progress('-- removing folder: ' +folder)
-                        os.system("s3cmd -c --force "+scriptsDir+"s3.cfg --host="+region+" --access_key="+s3AccessKey+" --secret_key="+s3SecretKey+" del -r "+folder)
-            progress("done")
-    else:
-        progress("-- Please specify destination prod or dev")
-#####################
-#                   #
-#     Restore       #
-#                   #
-#####################
-elif args.restore:
-    progress("Script executed in restore mode the "+str(currentDate))
-    #test if date specified can be restored
-    if not (os.popen("s3cmd -c "+scriptsDir+"s3.cfg --host="+regionS3.get(next(iter(regionS3)))+" --access_key="+s3AccessKey+" --secret_key="+s3SecretKey+" ls s3://"+servicename+"-backup-"+next(iter(regionS3))+"/"+args.date+"/  | awk '{print $NF}'").read().splitlines()):
-        progress("!- The date you specified does not exist on storage, please verify with --show command")
-        exit()
-    if args.env=="dev" or args.env=="prod":
-        progress("Starting restore from "+args.date+" folder in S3 backup")
-        checkBaseFolder()
-        progress("-- Download backup to temp folder...")
-        os.system("s3cmd -q -c "+scriptsDir+"s3.cfg --host="+regionS3.get(next(iter(regionS3)))+" --access_key="+s3AccessKey+" --secret_key="+s3SecretKey+" get s3://"+servicename+"-backup-"+next(iter(regionS3))+"/"+args.date+"/backup.tar.gz "+workingDir )
-        progress("done")
-        progress("-- Uncompress the backup to temp folder...")
-        os.system("tar -xzf "+workingDir+"/backup.tar.gz -C "+dumpDirPath+"/.")
-        progress("done")
-        if any(pathsList):
-            progress("Restore files")
-            for path in pathsList:
-                if len(path+"/*") > 2:  
-                    progress("-- Get target folder folder security settings for "+path+" ... ")
-                    pathInfo = Path(path)
-                    owner = pathInfo.owner()
-                    group = pathInfo.group()
-                    progress("done")
-                    progress("-- Delete content in "+path+" ... ")
-                    #rm -rf / protection
-                    os.system('rm -rf '+path+'/*')
-                    progress("done")
-                    progress("-- Move restored file to "+path+" and restore security settings...")
-                    os.system('mv '+dumpDirPath+path+'/* '+path)
-                    os.system('chown -R '+owner+':'+group+' '+path)
-                    progress("done")
-        else:
-            progress("!- No files specified, database restoration only ")
-        if not any(dbList):
-            cleanDatabaseList = []
-            for dirpath, dirnames, filenames in os.walk(dumpDirPath):
-                for filename in filenames:
-                    if filename.endswith(".sql"):
-                        cleanDatabaseList.append(filename.split(".")[0])
-            dbList = cleanDatabaseList
-        if any(dbList):
-            for db in dbList:
-                progress("Start database restoration :"+db)
-                progress("-- Drop "+db+" database before restoring data...")
-                os.system('mariadb-admin -s -u'+dbadmin+' -p'+dbpassword+' -h '+dbhost+' -f drop '+db+" > /dev/null")
-                progress("done")
-                progress("-- Restore database "+db+" from backup...")
-                os.system('mariadb-admin -s -u'+dbadmin+' -p'+dbpassword+' -h '+dbhost+' -f create '+db)
-                os.system('mariadb -u'+dbadmin+' -p'+dbpassword+' -h '+dbhost+' -D '+db+' < '+dumpDirPath+'/'+db+'.sql')
-                progress("done")
-        else:
-            progress("!- Aucune base de donnée présente dans le fichier de restoration")
-        if args.extra:
-            progress("-- executing post-restore script")
-            progress("done")
-            os.system(args.extra+" > /dev/null")
-#####################
-#                   #
-#    Show           #
-#                   #
-#####################
-elif args.show:
-    if args.env=="dev" or args.env=="prod":
-        progress("List of available restoration points on : "+regionS3.get("primary"))
-        restorePoints = os.popen("s3cmd -c "+scriptsDir+"s3.cfg --host="+regionS3.get(next(iter(regionS3)))+" --access_key="+s3AccessKey+" --secret_key="+s3SecretKey+" ls s3://"+servicename+"-backup-primary/ | awk '{print $NF}'").read().splitlines()
-        for point in restorePoints:
-            progress("-> "+(point.split('/'))[3])
-        exit()
-    else:
-        progress("!- Please specify S3 envirronement prod or dev")
-        exit()
+def cleanup():
+    if os.path.exists(workingDir):
+        shutil.rmtree(workingDir, ignore_errors=True)
 
+# Backup
+if args.backup:
+    progress(f"Script executed in backup mode on {currentDate}")
+    try:
+        test_vars()
+        if args.env not in ["dev", "prod"]:
+            progress("!- Please specify destination prod or dev")
+            sys.exit(1)
+
+        if not dbList and dbpassword:
+            progress("!- No database specified, searching with credentials")
+            db_list_cmd = f"mariadb -u {dbadmin} -p{dbpassword} -sN -e 'show databases'"
+            dbList = [db for db in subprocess.check_output(db_list_cmd, shell=True).decode().split("\n")
+                     if db and db not in excludedDbs]
+
+        progress(f"Starting backup of {servicename} to S3 {args.env}")
+        check_base_folder()
+
+        if dbpassword and dbList:
+            for db in dbList:
+                progress(f"-- Backup database {db} to temp folder...")
+                os.system(f"mariadb-dump -u {dbadmin} -p{dbpassword} -h {dbhost} --complete-insert --routines --triggers --single-transaction \"{db}\" > {dumpDirPath}/\"{db}\".sql")
+                progress("done")
+
+        if pathsList:
+            for path in pathsList:
+                progress(f"-- Copy content from {path} to temp folder...")
+                os.makedirs(f"{dumpDirPath}{path}", exist_ok=True)
+                os.system(f"cp -r {path}/* {dumpDirPath}{path}/")
+                progress("done")
+
+        progress("-- Compress files in temp folder")
+        os.system(f"tar -C {dumpDirPath} -czf {workingDir}/backup.tar.gz .")
+        progress("done")
+
+        for priority, region in regionS3.items():
+            progress(f"-- Upload to {region} on s3://{servicename}-backup-{priority}...")
+            os.system(f"s3cmd -q -c {scriptsDir}s3.cfg --host={region} --access_key={s3AccessKey} --secret_key={s3SecretKey} put {workingDir}/backup.tar.gz s3://{servicename}-backup-{priority}/{pathDate}/")
+            os.system(f"s3cmd -q -c {scriptsDir}s3.cfg --host={region} --access_key={s3AccessKey} --secret_key={s3SecretKey} del -r s3://{servicename}-backup-{priority}/latest/")
+            os.system(f"s3cmd -q -c {scriptsDir}s3.cfg --host={region} --access_key={s3AccessKey} --secret_key={s3SecretKey} cp -r s3://{servicename}-backup-{priority}/{pathDate}/ s3://{servicename}-backup-{priority}/latest/")
+            progress("done")
+
+            progress(f"-- S3 Cleanup on {region}...")
+            folderList = os.popen(f"s3cmd -q -c {scriptsDir}s3.cfg --host={region} --access_key={s3AccessKey} --secret_key={s3SecretKey} ls s3://{servicename}-backup-{priority}/ | awk '{{print $NF}}'").read().splitlines()
+            for folder in folderList:
+                if folder != f"s3://{servicename}-backup-{priority}/latest/":
+                    folderDate = datetime.strptime(folder.split('/')[3], '%Y%m%d-%H%M%S')
+                    if (datetime.timestamp(currentDate) - datetime.timestamp(folderDate)) > (retentionDays * 24 * 60 * 60):
+                        progress(f'-- removing folder: {folder}')
+                        os.system(f"s3cmd -c --force {scriptsDir}s3.cfg --host={region} --access_key={s3AccessKey} --secret_key={s3SecretKey} del -r {folder}")
+            progress("done")
+
+    except Exception as e:
+        progress(f"+! Backup failed: {str(e)}")
+        sys.exit(1)
+
+# Restore
+elif args.restore:
+    progress(f"Script executed in restore mode on {currentDate}")
+    try:
+        test_vars()
+        if args.env not in ["dev", "prod"]:
+            progress("!- Please specify environment prod or dev")
+            sys.exit(1)
+
+        first_region = regionS3[next(iter(regionS3))]
+        if not os.popen(f"s3cmd -c {scriptsDir}s3.cfg --host={first_region} --access_key={s3AccessKey} --secret_key={s3SecretKey} ls s3://{servicename}-backup-{next(iter(regionS3))}/{args.date}/").read():
+            progress("!- Specified date does not exist on storage, use --show to verify")
+            sys.exit(1)
+
+        progress(f"Starting restore from {args.date} folder in S3 backup")
+        check_base_folder()
+        progress("-- Download backup to temp folder...")
+        os.system(f"s3cmd -q -c {scriptsDir}s3.cfg --host={first_region} --access_key={s3AccessKey} --secret_key={s3SecretKey} get s3://{servicename}-backup-{next(iter(regionS3))}/{args.date}/backup.tar.gz {workingDir}")
+        progress("done")
+        progress("-- Uncompress backup...")
+        os.system(f"tar -xzf {workingDir}/backup.tar.gz -C {dumpDirPath}/.")
+        progress("done")
+
+        if pathsList:
+            for path in pathsList:
+                path_info = Path(path)
+                owner, group = path_info.owner(), path_info.group()
+                progress(f"-- Restore files to {path}...")
+                os.system(f'rm -rf {path}/* && mv {dumpDirPath}{path}/* {path} && chown -R {owner}:{group} {path}')
+                progress("done")
+
+        if not dbList:
+            dbList = [f.split(".")[0] for _, _, files in os.walk(dumpDirPath) for f in files if f.endswith(".sql")]
+
+        if dbList:
+            for db in dbList:
+                progress(f"-- Restore database {db}...")
+                os.system(f'mariadb-admin -s -u{dbadmin} -p{dbpassword} -h {dbhost} -f drop {db} > /dev/null')
+                os.system(f'mariadb-admin -s -u{dbadmin} -p{dbpassword} -h {dbhost} -f create {db}')
+                os.system(f'mariadb -u{dbadmin} -p{dbpassword} -h {dbhost} -D {db} < {dumpDirPath}/{db}.sql')
+                progress("done")
+
+        if args.extra:
+            progress("-- Executing post-restore script...")
+            os.system(f"{args.extra} > /dev/null")
+            progress("done")
+
+    except Exception as e:
+        progress(f"+! Restore failed: {str(e)}")
+        sys.exit(1)
+
+# Show
+elif args.show:
+    try:
+        if args.env in ["dev", "prod"]:
+            first_region_key = next(iter(regionS3))
+            region = regionS3[first_region_key]
+            bucket_suffix = "primary-dev" if args.env == "dev" else "primary"
+            
+            progress(f"List of available restoration points on: {region}")
+            cmd = f"s3cmd -q -c {scriptsDir}s3.cfg --host={region} --access_key={s3AccessKey} --secret_key={s3SecretKey} ls s3://{servicename}-backup-{bucket_suffix}/ | awk '{{print $NF}}'"
+            restorePoints = os.popen(cmd).read().splitlines()
+            
+            for point in restorePoints:
+                progress("-> " + point.split('/')[3])
+            sys.exit(0)
+        else:
+            progress("!- Please specify S3 environment prod or dev")
+            sys.exit(1)
+    except Exception as e:
+        progress(f"+! Show failed: {str(e)}")
+        sys.exit(1)
+
+# Cleanup and timing
 progress("-- Local Cleanup...")
-os.system("rm -rf "+workingDir)
+cleanup()
 progress("done")
-end_time = time.time()
-total_time= f"{end_time - start_time:.2f}"
-progress("Execution finished -> Duration : "+total_time+" seconds")
+total_time = f"{time.time() - start_time:.2f}"
+progress(f"Execution finished -> Duration: {total_time} seconds")
