@@ -282,7 +282,6 @@ elif args.show:
         bucket = "s3://" + servicename + "-backup-" + region_key + "/"
         restorePoints = os.popen("s3cmd -c " + scriptsDir + "s3.cfg --host=" + regionS3.get(region_key) + " --access_key=" + s3AccessKey + " --secret_key=" + s3SecretKey + " ls " + bucket + " | awk '{print $NF}'").read().splitlines()
         for point in restorePoints:
-            # On suppose que le dossier est de la forme .../YYYYMMDD-HHMMSS/
             parts = point.split('/')
             if len(parts) > 3:
                 progress("-> " + parts[3])
